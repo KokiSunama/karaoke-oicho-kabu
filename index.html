@@ -1,0 +1,753 @@
+<!--PAGES-HEAD-START-->
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="カラオケの採点結果でおいちょかぶをするスコア管理ツール">
+<meta name="theme-color" content="#1a1030">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="おいちょかぶ">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="favicon.png" type="image/png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<style>
+/* ノッチやホームバーの分だけ上下に余白を取る */
+:root { box-sizing: border-box; padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
+body { margin: 0; }
+[hidden] { display: none !important; }
+</style>
+<!--PAGES-HEAD-END-->
+<title>カラオケおいちょかぶ</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Dela+Gothic+One&family=DotGothic16&family=Zen+Kaku+Gothic+New:wght@500;700&display=swap">
+<style>
+/* Layout: 1台のスマホを回す前提の1画面アプリ。上にポット、中央に全員の採点表示、下にカラオケのリモコン風テンキー */
+/* 単一テーマ(夜のカラオケ)に固定。色はExpo版の theme.ts を引き継ぎ、革命が起きると画面全体の色が反転する */
+:root {
+  --bg: #1a1030;
+  --surface: #2a1c4a;
+  --surface-2: #3a2864;
+  --line: #4d3a7a;
+  --ink: #ffffff;
+  --ink-dim: #c9bfe0;
+  --hot: #ff5da2;
+  --on-hot: #1a1030;
+  --gold: #ffd23f;
+  --gain: #4ade80;
+  --loss: #ff9c9c;
+  --font-display: "Dela Gothic One", "Hiragino Sans", "Yu Gothic", sans-serif;
+  --font-body: "Zen Kaku Gothic New", "Hiragino Sans", "Yu Gothic", sans-serif;
+  --font-score: "DotGothic16", "MS Gothic", monospace;
+  color-scheme: dark;
+}
+body.rev {
+  --bg: #3a0712;
+  --surface: #561020;
+  --surface-2: #6f1a2d;
+  --line: #92324a;
+  --ink: #fff7e6;
+  --ink-dim: #f2c9c9;
+  --hot: #ffd23f;
+  --on-hot: #3a0712;
+  --gold: #fff1a8;
+  --gain: #86efac;
+  --loss: #ffb9b0;
+}
+*, *::before, *::after { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-weight: 500;
+  font-size: 15px;
+  line-height: 1.5;
+  overflow-x: hidden;
+  transition: background-color 0.35s ease;
+  -webkit-text-size-adjust: 100%;
+}
+button, input { font: inherit; color: inherit; }
+button { cursor: pointer; touch-action: manipulation; }
+button:disabled { cursor: default; }
+:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+#app {
+  height: 100%;
+  max-width: 560px;
+  margin: 0 auto;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* 共通のボタン */
+.btn-main {
+  flex: none;
+  width: 100%;
+  min-height: 54px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--hot);
+  color: var(--on-hot);
+  font-family: var(--font-display);
+  font-size: 18px;
+  letter-spacing: 0.04em;
+}
+.btn-main:disabled { background: var(--surface-2); color: var(--ink-dim); font-family: var(--font-body); font-weight: 700; font-size: 15px; }
+.btn-sub {
+  min-height: 40px;
+  padding: 6px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: transparent;
+  color: var(--ink-dim);
+  font-weight: 700;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+/* 採点表示の数字。役に効く3桁を金色にする */
+.score {
+  display: inline-flex;
+  font-family: var(--font-score);
+  font-size: 25px;
+  line-height: 1.1;
+  letter-spacing: 0.01em;
+  font-variant-numeric: tabular-nums;
+}
+.score i { font-style: normal; display: inline-block; width: 0.56em; text-align: center; }
+.score .dot { width: 0.36em; color: var(--ink-dim); }
+.score .count { color: var(--gold); }
+.score .tail { color: var(--ink); }
+.score .empty { color: var(--line); }
+.score .run { color: var(--on-hot); background: var(--hot); border-radius: 3px; }
+.score .caret { color: var(--ink); background: var(--line); border-radius: 3px; animation: blink 1s steps(2, jump-none) infinite; }
+@keyframes blink { 50% { background: transparent; } }
+
+/* ---- 登録画面 ---- */
+#app.setup { height: auto; min-height: 100%; }
+.title {
+  margin: 4px 0 0;
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: clamp(30px, 9.6vw, 44px);
+  line-height: 1.12;
+  text-wrap: balance;
+}
+.title span { display: block; color: var(--gold); }
+.demo {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  padding-block: 2px 4px;
+}
+.demo .score { font-size: 34px; }
+.demo p { margin: 0; color: var(--ink-dim); font-size: 13px; }
+.demo p b { color: var(--gold); font-weight: 700; }
+.field { display: flex; flex-direction: column; gap: 8px; }
+.label { font-size: 13px; font-weight: 700; color: var(--ink-dim); letter-spacing: 0.04em; }
+.note { margin: 0; font-size: 12px; color: var(--ink-dim); }
+.rates { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; }
+.rate {
+  min-height: 44px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--ink-dim);
+  font-family: var(--font-score);
+  font-size: 18px;
+}
+.rate[aria-pressed="true"] { background: var(--hot); border-color: var(--hot); color: var(--on-hot); }
+.add { display: flex; gap: 8px; }
+.text-input {
+  flex: 1;
+  min-width: 0;
+  min-height: 46px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  font-size: 16px; /* 16px未満だとiOSが入力時にズームする */
+}
+.text-input::placeholder { color: var(--ink-dim); }
+.btn-add {
+  flex: none;
+  min-width: 68px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--surface-2);
+  font-weight: 700;
+}
+.roster { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.roster li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 46px;
+  border-bottom: 1px solid var(--surface-2);
+}
+.roster .no { width: 20px; font-family: var(--font-score); color: var(--gold); text-align: center; flex: none; }
+.roster .nm { flex: 1; min-width: 0; font-weight: 700; overflow-wrap: anywhere; }
+.btn-del {
+  flex: none;
+  width: 40px;
+  height: 40px;
+  border: 0;
+  background: transparent;
+  color: var(--ink-dim);
+  font-size: 16px;
+}
+.rules { border-top: 1px solid var(--surface-2); padding-top: 10px; }
+.rules summary { cursor: pointer; font-size: 13px; font-weight: 700; color: var(--ink-dim); min-height: 28px; }
+.rules ul { margin: 6px 0 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+.start-dock {
+  position: sticky;
+  bottom: 0;
+  margin-top: auto;
+  padding-block: 8px 2px;
+  background: var(--bg);
+}
+
+/* ---- 入力画面 ---- */
+.bar { flex: none; display: flex; align-items: flex-end; gap: 8px; }
+.pot { flex: 1; min-width: 0; }
+.pot .meta { display: flex; flex-wrap: wrap; gap: 0 8px; font-size: 12px; color: var(--ink-dim); }
+.pot .meta b { color: var(--gold); font-weight: 700; }
+.pot .val { font-family: var(--font-score); font-size: 32px; line-height: 1.1; color: var(--gold); font-variant-numeric: tabular-nums; }
+.pot .val small { font-size: 15px; margin-left: 3px; }
+.bar .btn-sub { padding-inline: 10px; }
+.rev-flag {
+  flex: none;
+  padding: 6px 12px;
+  border-radius: 10px;
+  background: var(--hot);
+  color: var(--on-hot);
+  font-weight: 700;
+  font-size: 13px;
+  text-align: center;
+  animation: slam 0.35s ease-out;
+}
+.rev-flag b { font-family: var(--font-display); font-weight: 400; font-size: 15px; margin-right: 6px; }
+@keyframes slam { from { transform: scale(1.12); } to { transform: scale(1); } }
+.rows { flex: 1; min-height: 0; overflow-y: auto; list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.row {
+  width: 100%;
+  min-height: 56px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto 62px;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border: 2px solid transparent;
+  border-radius: 10px;
+  background: var(--surface);
+  text-align: left;
+}
+.row[aria-current="true"] { border-color: var(--hot); background: var(--surface-2); }
+.who { min-width: 0; }
+.who .nm { display: block; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chips { display: block; font-size: 12px; font-variant-numeric: tabular-nums; color: var(--gain); }
+.chips.neg { color: var(--loss); }
+.yaku { display: flex; flex-direction: column; align-items: flex-end; line-height: 1.15; color: var(--ink-dim); }
+.yaku b { font-family: var(--font-score); font-weight: 400; font-size: 22px; }
+.yaku small { font-size: 11px; white-space: nowrap; }
+.yaku.strong { color: var(--gold); }
+
+/* リモコン風テンキー */
+.remote { flex: none; display: flex; flex-direction: column; gap: 8px; }
+.pad { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; user-select: none; -webkit-user-select: none; }
+.key {
+  height: clamp(40px, 6.6vh, 54px);
+  border: 0;
+  border-bottom: 3px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-2);
+  font-family: var(--font-score);
+  font-size: 24px;
+}
+.key.fn { font-family: var(--font-body); font-weight: 700; font-size: 14px; color: var(--ink-dim); background: var(--surface); }
+.key:active { transform: translateY(2px); border-bottom-width: 1px; }
+
+/* ---- 結果画面 ---- */
+#app.result { height: auto; min-height: 100%; }
+.verdict { padding-block: 4px; animation: slam 0.35s ease-out; }
+.verdict .eyebrow { margin: 0; font-size: 13px; font-weight: 700; color: var(--ink-dim); letter-spacing: 0.08em; }
+.verdict h1 { margin: 0; font-family: var(--font-display); font-weight: 400; font-size: clamp(30px, 9vw, 42px); line-height: 1.2; overflow-wrap: anywhere; text-wrap: balance; }
+.verdict .prize { margin: 2px 0 0; font-family: var(--font-score); font-size: 26px; color: var(--gold); }
+.verdict .sub { margin: 2px 0 0; font-size: 13px; color: var(--ink-dim); }
+.ranks { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.rank {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) auto 62px;
+  align-items: center;
+  gap: 8px;
+  min-height: 56px;
+  padding: 6px 10px;
+  border: 2px solid transparent;
+  border-radius: 10px;
+  background: var(--surface);
+}
+.rank.win { border-color: var(--gold); }
+.rank .no { font-family: var(--font-score); font-size: 18px; color: var(--ink-dim); text-align: center; }
+.rank.win .no { color: var(--gold); }
+.after { display: flex; flex-direction: column; gap: 8px; margin-top: auto; padding-top: 4px; }
+.after-sub { display: flex; gap: 8px; }
+.after-sub .btn-sub { flex: 1; }
+
+/* ---- ダイアログ ---- */
+dialog {
+  width: min(340px, calc(100vw - 32px));
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+  color: var(--ink);
+}
+dialog::backdrop { background: rgba(8, 4, 20, 0.7); }
+dialog h2 { margin: 0 0 6px; font-size: 17px; font-weight: 700; }
+dialog p { margin: 0 0 12px; font-size: 13px; color: var(--ink-dim); }
+.dlg-actions { display: flex; gap: 8px; margin-top: 12px; }
+.dlg-actions button { flex: 1; min-height: 46px; border-radius: 10px; font-weight: 700; }
+.dlg-cancel { border: 1px solid var(--line); background: transparent; color: var(--ink-dim); }
+.dlg-ok { border: 0; background: var(--hot); color: var(--on-hot); }
+
+@media (prefers-reduced-motion: reduce) {
+  body { transition: none; }
+  .score .caret, .rev-flag, .verdict { animation: none; }
+}
+</style>
+
+<main id="app"></main>
+
+<dialog id="join-dialog" aria-labelledby="join-title">
+  <form id="join-form">
+    <h2 id="join-title">途中参加</h2>
+    <p id="join-note"></p>
+    <label class="label" for="join-input" hidden>名前</label>
+    <input class="text-input" id="join-input" style="width:100%" maxlength="12" placeholder="名前を入力" autocomplete="off" enterkeyhint="done">
+    <div class="dlg-actions">
+      <button type="button" class="dlg-cancel" id="join-cancel">やめる</button>
+      <button type="submit" class="dlg-ok">参加する</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="reset-dialog" aria-labelledby="reset-title">
+  <h2 id="reset-title">ゲームをリセットしますか?</h2>
+  <p>全員の持ち点・ポット・キャリーオーバーが消えて、参加者の登録画面に戻ります。</p>
+  <div class="dlg-actions">
+    <button type="button" class="dlg-cancel" id="reset-cancel">続ける</button>
+    <button type="button" class="dlg-ok" id="reset-ok">リセットする</button>
+  </div>
+</dialog>
+
+<script src="logic.js"></script>
+<script>
+(function () {
+  const L = window.OichoLogic;
+  const STORAGE_KEY = 'karaoke-oicho-kabu:v1';
+  const app = document.getElementById('app');
+  const $ = (id) => document.getElementById(id);
+
+  const fresh = () => ({
+    phase: 'setup',
+    game: L.createGame(1),
+    round: 0,
+    roundIds: [],
+    scores: {},
+    activeId: null,
+    outcome: null,
+    potBefore: 0,
+    undoGame: null,
+  });
+
+  // 途中でタブが閉じても続きから遊べるように、変更のたびに端末へ保存する
+  function load() {
+    try {
+      const s = JSON.parse(localStorage.getItem(STORAGE_KEY));
+      return s && s.game && Array.isArray(s.game.players) ? s : null;
+    } catch (e) {
+      return null;
+    }
+  }
+  function save() {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(S));
+    } catch (e) {
+      /* 保存できない環境でもゲームは続行できる */
+    }
+  }
+
+  let S = load() || fresh();
+
+  const esc = (t) =>
+    String(t).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const num = (n) => n.toLocaleString('ja-JP');
+  const chipsText = (n) => `${n > 0 ? '+' : ''}${num(n)} pt`;
+  const playerOf = (id) => S.game.players.find((p) => p.id === id);
+  const rawOf = (id) => S.scores[id] || '';
+
+  // ---- 共通の部品 ----
+
+  function scoreHtml(raw, active) {
+    const run = L.tripleRunStart(raw);
+    let html = '';
+    for (let i = 0; i < L.RAW_SCORE_LENGTH; i++) {
+      if (i === 2) html += '<i class="dot">.</i>';
+      if (i < raw.length) {
+        const inRun = run !== -1 && i >= run && i < run + 3;
+        html += `<i class="${inRun ? 'run' : i < 3 ? 'count' : 'tail'}">${raw[i]}</i>`;
+      } else if (active && i === raw.length) {
+        html += '<i class="caret">&nbsp;</i>';
+      } else {
+        html += '<i class="empty">-</i>';
+      }
+    }
+    return `<span class="score" aria-hidden="true">${html}</span>`;
+  }
+
+  function yakuHtml(base, revolution, flag) {
+    if (base === null) return '<span class="yaku"><small>未入力</small></span>';
+    const strong = revolution ? base <= 2 : base >= 7;
+    return `<span class="yaku${strong ? ' strong' : ''}"><b>${base}</b><small>${flag ? '革命' : L.YAKU_NAMES[base]}</small></span>`;
+  }
+
+  // ---- 登録画面 ----
+
+  function renderSetup() {
+    const { players, rate } = S.game;
+    app.className = 'setup';
+    app.innerHTML = `
+      <h1 class="title">カラオケ<span>おいちょかぶ</span></h1>
+      <div class="demo">
+        ${scoreHtml('84722')}
+        <p>例: 8+4+7=19 の下1桁で <b>役9 カブ</b></p>
+      </div>
+      <div class="field">
+        <span class="label" id="rate-label">レート</span>
+        <div class="rates" role="group" aria-labelledby="rate-label">
+          ${L.RATES.map((r) => `<button type="button" class="rate" data-rate="${r}" aria-pressed="${r === rate}">×${r}</button>`).join('')}
+        </div>
+        <p class="note">1ラウンドのベットは1人 ${num(L.baseBet(rate))} pt</p>
+      </div>
+      <div class="field">
+        <label class="label" for="name-input">参加者 ${players.length ? `${players.length}人` : ''}</label>
+        <form class="add" id="add-form">
+          <input class="text-input" id="name-input" maxlength="12" placeholder="名前を入力" autocomplete="off" enterkeyhint="done">
+          <button type="submit" class="btn-add">追加</button>
+        </form>
+        ${players.length
+          ? `<ul class="roster">${players
+              .map(
+                (p, i) => `<li><span class="no">${i + 1}</span><span class="nm">${esc(p.name)}</span>
+                  <button type="button" class="btn-del" data-del="${p.id}" aria-label="${esc(p.name)}を外す">✕</button></li>`
+              )
+              .join('')}</ul>`
+          : '<p class="note">歌う人を順番に追加してね。スマホ1台を回して使います。</p>'}
+      </div>
+      <details class="rules">
+        <summary>ルールを見る</summary>
+        <ul>
+          <li>得点の十の位+一の位+小数第一位を足した下1桁が役。9に近いほど強い。</li>
+          <li>同じ役なら小数第二位以下で勝負して、9に近いほうが勝ち。</li>
+          <li>全5桁のどこかに同じ数字が3つ並ぶと革命。そのラウンドは0に近いほど強くなる。</li>
+          <li>通常は役7以上、革命中は役2以下の人がいないと勝者なし。ポットは次へキャリーオーバー。</li>
+          <li>勝者がポットを総取り。同点なら山分け。持ち点はマイナスになっても続行。</li>
+          <li>途中参加のベットは (キャリーオーバー回数+1) × 基本ベット。</li>
+        </ul>
+      </details>
+      <div class="start-dock">
+        <button type="button" class="btn-main" data-act="start" ${players.length ? '' : 'disabled'}>
+          ${players.length ? 'ゲーム開始' : '参加者を追加すると始められます'}
+        </button>
+      </div>`;
+  }
+
+  // ---- 入力画面 ----
+
+  function isRevolutionNow() {
+    return S.roundIds.some((id) => L.triggersRevolution(rawOf(id)));
+  }
+
+  function renderRound() {
+    app.className = 'round';
+    app.innerHTML = `
+      <header class="bar">
+        <div class="pot">
+          <div class="meta" id="pot-meta"></div>
+          <div class="val" id="pot-val"></div>
+        </div>
+        <button type="button" class="btn-sub" data-act="join">＋途中参加</button>
+        <button type="button" class="btn-sub" data-act="reset">リセット</button>
+      </header>
+      <div id="rev-slot"></div>
+      <ul class="rows" id="rows"></ul>
+      <div class="remote">
+        <div class="pad" aria-label="得点入力">
+          ${[1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => `<button type="button" class="key" data-key="${n}">${n}</button>`).join('')}
+          <button type="button" class="key fn" data-key="back" aria-label="1桁消す">⌫ 消す</button>
+          <button type="button" class="key" data-key="0">0</button>
+          <button type="button" class="key fn" data-key="next">次の人 ▼</button>
+        </div>
+        <button type="button" class="btn-main" id="resolve" data-act="resolve"></button>
+      </div>`;
+    updateRound();
+  }
+
+  function updateRound() {
+    const revolution = isRevolutionNow();
+    document.body.classList.toggle('rev', revolution);
+
+    $('pot-meta').innerHTML = `<span>第${S.round}ラウンド・ポット</span>${
+      S.game.carryOverCount ? `<b>キャリーオーバー×${S.game.carryOverCount}</b>` : ''
+    }`;
+    $('pot-val').innerHTML = `${num(S.game.pot)}<small>pt</small>`;
+
+    const slot = $('rev-slot');
+    if (revolution && !slot.firstChild) {
+      slot.innerHTML = '<div class="rev-flag" role="status"><b>革命!</b>0に近いほど強い</div>';
+    } else if (!revolution) {
+      slot.innerHTML = '';
+    }
+    slot.hidden = !revolution;
+
+    const list = $('rows');
+    const top = list.scrollTop;
+    list.innerHTML = S.roundIds
+      .map((id) => {
+        const p = playerOf(id);
+        const raw = rawOf(id);
+        const active = id === S.activeId;
+        const base = L.baseFromRaw(raw);
+        const flag = L.triggersRevolution(raw);
+        const spoken = raw ? L.formatRaw(raw) : '未入力';
+        return `<li><button type="button" class="row" data-row="${id}" aria-current="${active}" aria-label="${esc(p.name)} 得点 ${spoken}">
+          <span class="who"><span class="nm">${esc(p.name)}</span><span class="chips${p.chips < 0 ? ' neg' : ''}">${chipsText(p.chips)}</span></span>
+          ${scoreHtml(raw, active)}
+          ${yakuHtml(base, revolution, flag)}
+        </button></li>`;
+      })
+      .join('');
+    list.scrollTop = top;
+    const current = list.querySelector('[aria-current="true"]');
+    if (current) current.scrollIntoView({ block: 'nearest' });
+
+    const left = S.roundIds.filter((id) => !L.isComplete(rawOf(id))).length;
+    const resolve = $('resolve');
+    resolve.disabled = left > 0;
+    resolve.textContent = left > 0 ? `あと${left}人の得点を入力` : '結果を見る';
+  }
+
+  function nextIncomplete(fromId) {
+    const ids = S.roundIds;
+    const start = ids.indexOf(fromId);
+    for (let i = 1; i <= ids.length; i++) {
+      const id = ids[(start + i) % ids.length];
+      if (!L.isComplete(rawOf(id))) return id;
+    }
+    return fromId;
+  }
+
+  function pressKey(key) {
+    const id = S.activeId;
+    if (!id) return;
+    const raw = rawOf(id);
+    if (key === 'back') {
+      S.scores[id] = raw.slice(0, -1);
+    } else if (key === 'next') {
+      S.activeId = S.roundIds[(S.roundIds.indexOf(id) + 1) % S.roundIds.length];
+    } else if (!L.isComplete(raw)) {
+      S.scores[id] = raw + key;
+      // 5桁入ったら次の未入力の人へ自動で移る
+      if (L.isComplete(S.scores[id])) S.activeId = nextIncomplete(id);
+    }
+    save();
+    updateRound();
+  }
+
+  // ---- 結果画面 ----
+
+  function renderResult() {
+    const { outcome, game, potBefore } = S;
+    const nameOf = (id) => (playerOf(id) ? playerOf(id).name : '???');
+    const winnerIds = new Set(outcome.winners.map((w) => w.playerId));
+    const share = outcome.hasWinner ? Math.floor(potBefore / outcome.winners.length) : 0;
+    document.body.classList.toggle('rev', outcome.revolution);
+    app.className = 'result';
+
+    const verdict = outcome.hasWinner
+      ? `<p class="eyebrow">${outcome.revolution ? '革命ラウンド・' : ''}${outcome.winners.length > 1 ? '山分け' : '総取り'}</p>
+         <h1>${outcome.winners.map((w) => esc(nameOf(w.playerId))).join(' / ')}</h1>
+         <p class="prize">+${num(share)} pt</p>
+         ${game.pot ? `<p class="sub">割り切れない ${num(game.pot)} pt はポットに残るよ</p>` : ''}`
+      : `<p class="eyebrow">${outcome.revolution ? '革命ラウンド・' : ''}${outcome.revolution ? '役2以下' : '役7以上'}が誰もいない</p>
+         <h1>勝者なし</h1>
+         <p class="prize">キャリーオーバー×${game.carryOverCount}</p>
+         <p class="sub">ポット ${num(game.pot)} pt は次のラウンドへ</p>`;
+
+    app.innerHTML = `
+      <section class="verdict" aria-live="polite">${verdict}</section>
+      <ol class="ranks">
+        ${outcome.results
+          .map((r) => {
+            const p = playerOf(r.playerId);
+            return `<li class="rank${winnerIds.has(r.playerId) ? ' win' : ''}">
+              <span class="no">${r.rank}</span>
+              <span class="who"><span class="nm">${esc(p.name)}</span><span class="chips${p.chips < 0 ? ' neg' : ''}">${chipsText(p.chips)}</span></span>
+              ${scoreHtml(r.raw, false)}
+              ${yakuHtml(r.base, outcome.revolution, false)}
+            </li>`;
+          })
+          .join('')}
+      </ol>
+      <div class="after">
+        <button type="button" class="btn-main" data-act="next-round">次のラウンドへ</button>
+        <div class="after-sub">
+          <button type="button" class="btn-sub" data-act="undo">得点を直す</button>
+          <button type="button" class="btn-sub" data-act="reset">ゲーム終了</button>
+        </div>
+      </div>`;
+    window.scrollTo(0, 0);
+  }
+
+  // ---- 進行 ----
+
+  function render() {
+    if (S.phase !== 'result' && S.phase !== 'round') document.body.classList.remove('rev');
+    if (S.phase === 'setup') renderSetup();
+    else if (S.phase === 'round') renderRound();
+    else renderResult();
+  }
+
+  function startRound() {
+    const ids = S.game.players.map((p) => p.id);
+    S.game = L.collectAnte(S.game, ids);
+    S.round += 1;
+    S.roundIds = ids;
+    S.scores = {};
+    S.activeId = ids[0];
+    S.outcome = null;
+    S.undoGame = null;
+    S.phase = 'round';
+  }
+
+  const actions = {
+    start() {
+      startRound();
+    },
+    resolve() {
+      const entries = S.roundIds.map((id) => ({ playerId: id, raw: rawOf(id) }));
+      S.outcome = L.evaluateRound(entries);
+      S.potBefore = S.game.pot;
+      S.undoGame = S.game;
+      S.game = L.resolveRound(S.game, S.outcome);
+      S.phase = 'result';
+    },
+    'next-round'() {
+      startRound();
+    },
+    undo() {
+      // 精算前の状態に戻す。打った得点は残してあるのでそのまま直せる
+      S.game = S.undoGame;
+      S.outcome = null;
+      S.undoGame = null;
+      S.phase = 'round';
+    },
+    join() {
+      const bet = L.joinBet(S.game.carryOverCount, S.game.rate);
+      const carry = S.game.carryOverCount;
+      $('join-note').textContent = `ベットは ${num(bet)} pt${carry ? `(キャリーオーバー${carry}回分を含む)` : ''}。持ち点からマイナスしてポットに入ります。`;
+      $('join-input').value = '';
+      $('join-dialog').showModal();
+      return false;
+    },
+    reset() {
+      $('reset-dialog').showModal();
+      return false;
+    },
+  };
+
+  app.addEventListener('click', (e) => {
+    const el = e.target.closest('button');
+    if (!el) return;
+    const { rate, del, row, key, act } = el.dataset;
+    if (key !== undefined) {
+      pressKey(key);
+      return;
+    }
+    if (row) {
+      S.activeId = row;
+      save();
+      updateRound();
+      return;
+    }
+    if (rate) {
+      S.game = { ...S.game, rate: Number(rate) };
+    } else if (del) {
+      S.game = L.removePlayer(S.game, del);
+    } else if (act && actions[act]) {
+      if (actions[act]() === false) return;
+    } else {
+      return;
+    }
+    save();
+    render();
+  });
+
+  app.addEventListener('submit', (e) => {
+    if (e.target.id !== 'add-form') return;
+    e.preventDefault();
+    const name = $('name-input').value.trim();
+    if (!name) return;
+    S.game = L.addPlayerFree(S.game, name);
+    save();
+    render();
+    $('name-input').focus();
+  });
+
+  $('join-form').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const name = $('join-input').value.trim();
+    if (!name) return;
+    S.game = L.addPlayer(S.game, name);
+    const added = S.game.players[S.game.players.length - 1];
+    S.roundIds = [...S.roundIds, added.id];
+    S.activeId = added.id;
+    $('join-dialog').close();
+    save();
+    updateRound();
+  });
+  $('join-cancel').addEventListener('click', () => $('join-dialog').close());
+  $('reset-cancel').addEventListener('click', () => $('reset-dialog').close());
+  $('reset-ok').addEventListener('click', () => {
+    $('reset-dialog').close();
+    S = fresh();
+    save();
+    render();
+  });
+
+  // PCではキーボードでも打てる
+  document.addEventListener('keydown', (e) => {
+    if (S.phase !== 'round' || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (document.querySelector('dialog[open]')) return;
+    if (/^[0-9]$/.test(e.key)) pressKey(e.key);
+    else if (e.key === 'Backspace') pressKey('back');
+    else if (e.key === 'ArrowDown') pressKey('next');
+    else return;
+    e.preventDefault();
+  });
+
+  render();
+})();
+</script>
+<!--PAGES-TAIL-START-->
+</html>
+<!--PAGES-TAIL-END-->
